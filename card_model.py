@@ -24,11 +24,15 @@ class TavernCardValidator:
         """
         self._last_validation_error = None
 
+        # If 'spec' is present, evaluate strictly as V2
+        if 'spec' in self.card:
+            if self.validate_v2():
+                return 2
+            return False
+
+        # Otherwise, evaluate as V1
         if self.validate_v1():
             return 1
-
-        if self.validate_v2():
-            return 2
 
         return False
 
