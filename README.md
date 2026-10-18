@@ -9,6 +9,10 @@ The application targets version 2 of the Character Card format as detailed at ht
 - loads JSON/PNG Character Cards in version 1, 2 or 3 format
 - saves JSON/PNG Character Cards in version 2 format
 
+![Screenshot](screenshot.png)
+
+> `default_Seraphina.png` (used as a definitive test) comes from the SillyTavern project and can be found here: https://github.com/SillyTavern/SillyTavern/blob/release/default/content/default_Seraphina.png
+
 ## Disclaimer
 
 This application was produced using AI (Gemini).

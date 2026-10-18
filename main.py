@@ -18,7 +18,7 @@ from card_model import (
 class CharacterCardEditorWindow(Gtk.Window):
     def __init__(self):
         super().__init__(title="SillyTavern Character Card Creator (V2/V3)")
-        self.set_default_size(900, 750)
+        self.set_default_size(950, 750)
         self.set_position(Gtk.WindowPosition.CENTER)
 
         self.current_file_path = None
@@ -35,6 +35,7 @@ class CharacterCardEditorWindow(Gtk.Window):
 
         # Notebook for Tabs
         self.notebook = Gtk.Notebook()
+        self.notebook.connect("switch-page", self.on_notebook_switch_page)
         main_box.pack_start(self.notebook, True, True, 0)
 
         # Build Tabs
@@ -42,6 +43,7 @@ class CharacterCardEditorWindow(Gtk.Window):
         self.notebook.append_page(self.create_prompts_tab(), Gtk.Label(label="Prompts & Settings"))
         self.notebook.append_page(self.create_greetings_tab(), Gtk.Label(label="Alternate Greetings"))
         self.notebook.append_page(self.create_metadata_tab(), Gtk.Label(label="Metadata & Tags"))
+        self.notebook.append_page(self.create_summary_tab(), Gtk.Label(label="Summary & Tokens"))
 
         # Status Bar / Token Info
         self.status_bar = Gtk.Statusbar()
@@ -81,7 +83,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         return toolbar
 
     def create_scrolled_text_view(self):
-        """Wraps a TextView inside a ScrolledWindow and a Bordered Frame for dark-mode visibility."""
         frame = Gtk.Frame()
         frame.set_shadow_type(Gtk.ShadowType.IN)
 
@@ -102,41 +103,60 @@ class CharacterCardEditorWindow(Gtk.Window):
         grid.set_row_spacing(10)
 
         # Name
-        grid.attach(Gtk.Label(label="Character Name:", xalign=0), 0, 0, 1, 1)
+        lbl_name = Gtk.Label(label="Character Name:", xalign=0)
+        lbl_name.set_valign(Gtk.Align.START)
+        grid.attach(lbl_name, 0, 0, 1, 1)
+        
         self.entry_name = Gtk.Entry()
         self.entry_name.set_hexpand(True)
+        self.entry_name.set_valign(Gtk.Align.START)
         grid.attach(self.entry_name, 1, 0, 1, 1)
 
         # Description
-        grid.attach(Gtk.Label(label="Description:", xalign=0), 0, 1, 1, 1)
+        lbl_desc = Gtk.Label(label="Description:", xalign=0)
+        lbl_desc.set_valign(Gtk.Align.START)
+        grid.attach(lbl_desc, 0, 1, 1, 1)
+        
         frame_desc, self.textview_desc = self.create_scrolled_text_view()
         frame_desc.set_hexpand(True)
         frame_desc.set_vexpand(True)
         grid.attach(frame_desc, 1, 1, 1, 1)
 
         # Personality
-        grid.attach(Gtk.Label(label="Personality Summary:", xalign=0), 0, 2, 1, 1)
+        lbl_pers = Gtk.Label(label="Personality Summary:", xalign=0)
+        lbl_pers.set_valign(Gtk.Align.START)
+        grid.attach(lbl_pers, 0, 2, 1, 1)
+        
         frame_pers, self.textview_pers = self.create_scrolled_text_view()
         frame_pers.set_hexpand(True)
         frame_pers.set_vexpand(True)
         grid.attach(frame_pers, 1, 2, 1, 1)
 
         # Scenario
-        grid.attach(Gtk.Label(label="Scenario:", xalign=0), 0, 3, 1, 1)
+        lbl_scen = Gtk.Label(label="Scenario:", xalign=0)
+        lbl_scen.set_valign(Gtk.Align.START)
+        grid.attach(lbl_scen, 0, 3, 1, 1)
+        
         frame_scen, self.textview_scen = self.create_scrolled_text_view()
         frame_scen.set_hexpand(True)
         frame_scen.set_vexpand(True)
         grid.attach(frame_scen, 1, 3, 1, 1)
 
-        # First Message (Greeting)
-        grid.attach(Gtk.Label(label="First Message:", xalign=0), 0, 4, 1, 1)
+        # First Message
+        lbl_first = Gtk.Label(label="First Message:", xalign=0)
+        lbl_first.set_valign(Gtk.Align.START)
+        grid.attach(lbl_first, 0, 4, 1, 1)
+        
         frame_first, self.textview_first = self.create_scrolled_text_view()
         frame_first.set_hexpand(True)
         frame_first.set_vexpand(True)
         grid.attach(frame_first, 1, 4, 1, 1)
 
         # Example Dialogue
-        grid.attach(Gtk.Label(label="Example Dialogue:", xalign=0), 0, 5, 1, 1)
+        lbl_ex = Gtk.Label(label="Example Dialogue:", xalign=0)
+        lbl_ex.set_valign(Gtk.Align.START)
+        grid.attach(lbl_ex, 0, 5, 1, 1)
+        
         frame_ex, self.textview_ex = self.create_scrolled_text_view()
         frame_ex.set_hexpand(True)
         frame_ex.set_vexpand(True)
@@ -151,21 +171,30 @@ class CharacterCardEditorWindow(Gtk.Window):
         grid.set_row_spacing(10)
 
         # System Prompt
-        grid.attach(Gtk.Label(label="System Prompt (Overrides Global):", xalign=0), 0, 0, 1, 1)
+        lbl_sys = Gtk.Label(label="System Prompt (Overrides Global):", xalign=0)
+        lbl_sys.set_valign(Gtk.Align.START)
+        grid.attach(lbl_sys, 0, 0, 1, 1)
+        
         frame_sys, self.textview_sys = self.create_scrolled_text_view()
         frame_sys.set_hexpand(True)
         frame_sys.set_vexpand(True)
         grid.attach(frame_sys, 1, 0, 1, 1)
 
         # Post History Instructions
-        grid.attach(Gtk.Label(label="Post-History Instructions (Jailbreak):", xalign=0), 0, 1, 1, 1)
+        lbl_post = Gtk.Label(label="Post-History Instructions (Jailbreak):", xalign=0)
+        lbl_post.set_valign(Gtk.Align.START)
+        grid.attach(lbl_post, 0, 1, 1, 1)
+        
         frame_post, self.textview_post = self.create_scrolled_text_view()
         frame_post.set_hexpand(True)
         frame_post.set_vexpand(True)
         grid.attach(frame_post, 1, 1, 1, 1)
 
         # Creator Notes
-        grid.attach(Gtk.Label(label="Creator Notes:", xalign=0), 0, 2, 1, 1)
+        lbl_notes = Gtk.Label(label="Creator Notes:", xalign=0)
+        lbl_notes.set_valign(Gtk.Align.START)
+        grid.attach(lbl_notes, 0, 2, 1, 1)
+        
         frame_notes, self.textview_notes = self.create_scrolled_text_view()
         frame_notes.set_hexpand(True)
         frame_notes.set_vexpand(True)
@@ -177,7 +206,9 @@ class CharacterCardEditorWindow(Gtk.Window):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.set_border_width(12)
 
-        box.pack_start(Gtk.Label(label="Alternate Greetings (Separate entries with '---' on a new line):", xalign=0), False, False, 0)
+        lbl = Gtk.Label(label="Alternate Greetings (Separate entries with '---' on a new line):", xalign=0)
+        lbl.set_valign(Gtk.Align.START)
+        box.pack_start(lbl, False, False, 0)
         
         frame_greetings, self.textview_greetings = self.create_scrolled_text_view()
         box.pack_start(frame_greetings, True, True, 0)
@@ -191,24 +222,113 @@ class CharacterCardEditorWindow(Gtk.Window):
         grid.set_row_spacing(10)
 
         # Creator
-        grid.attach(Gtk.Label(label="Creator:", xalign=0), 0, 0, 1, 1)
+        lbl_creator = Gtk.Label(label="Creator:", xalign=0)
+        lbl_creator.set_valign(Gtk.Align.START)
+        grid.attach(lbl_creator, 0, 0, 1, 1)
+        
         self.entry_creator = Gtk.Entry()
         self.entry_creator.set_hexpand(True)
+        self.entry_creator.set_valign(Gtk.Align.START)
         grid.attach(self.entry_creator, 1, 0, 1, 1)
 
         # Character Version
-        grid.attach(Gtk.Label(label="Character Version:", xalign=0), 0, 1, 1, 1)
+        lbl_version = Gtk.Label(label="Character Version:", xalign=0)
+        lbl_version.set_valign(Gtk.Align.START)
+        grid.attach(lbl_version, 0, 1, 1, 1)
+        
         self.entry_version = Gtk.Entry()
         self.entry_version.set_hexpand(True)
+        self.entry_version.set_valign(Gtk.Align.START)
         grid.attach(self.entry_version, 1, 1, 1, 1)
 
         # Tags
-        grid.attach(Gtk.Label(label="Tags (Comma separated):", xalign=0), 0, 2, 1, 1)
+        lbl_tags = Gtk.Label(label="Tags (Comma separated):", xalign=0)
+        lbl_tags.set_valign(Gtk.Align.START)
+        grid.attach(lbl_tags, 0, 2, 1, 1)
+        
         self.entry_tags = Gtk.Entry()
         self.entry_tags.set_hexpand(True)
+        self.entry_tags.set_valign(Gtk.Align.START)
         grid.attach(self.entry_tags, 1, 2, 1, 1)
 
         return grid
+
+    def create_summary_tab(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_border_width(16)
+
+        title = Gtk.Label()
+        title.set_markup("<b>Character Card Token &amp; Character Count Summary</b>")
+        title.set_xalign(0.0)
+        title.set_yalign(0.0)
+        box.pack_start(title, False, False, 0)
+
+        frame = Gtk.Frame()
+        frame.set_shadow_type(Gtk.ShadowType.IN)
+        
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        
+        self.summary_textview = Gtk.TextView()
+        self.summary_textview.set_editable(False)
+        self.summary_textview.set_cursor_visible(False)
+        self.summary_textview.set_monospace(True)
+        
+        scrolled.add(self.summary_textview)
+        frame.add(scrolled)
+        box.pack_start(frame, True, True, 0)
+
+        btn_refresh = Gtk.Button(label="Refresh Summary")
+        btn_refresh.connect("clicked", lambda w: self.refresh_summary_view())
+        box.pack_start(btn_refresh, False, False, 0)
+
+        return box
+
+    def refresh_summary_view(self):
+        self.update_card_from_ui()
+        data = self.card_data.get("data", self.card_data)
+
+        fields_to_check = [
+            ("Character Name", data.get("name", "")),
+            ("Description", data.get("description", "")),
+            ("Personality Summary", data.get("personality", "")),
+            ("Scenario", data.get("scenario", "")),
+            ("First Message", data.get("first_mes", "")),
+            ("Example Dialogue", data.get("mes_example", "")),
+            ("System Prompt", data.get("system_prompt", "")),
+            ("Post-History Instructions", data.get("post_history_instructions", "")),
+            ("Creator Notes", data.get("creator_notes", "")),
+            ("Creator", data.get("creator", "")),
+            ("Character Version", str(data.get("character_version", ""))),
+            ("Tags", ", ".join(data.get("tags", []))),
+            ("Alternate Greetings", "\n".join(data.get("alternate_greetings", [])))
+        ]
+
+        lines = []
+        lines.append(f"{'Field Name':<30} | {'Characters':<12} | {'Est. Tokens':<12}")
+        lines.append("-" * 60)
+
+        total_chars = 0
+        total_tokens = 0
+
+        for name, text in fields_to_check:
+            chars = len(text)
+            # Standard heuristic: ~4 characters per token for English text
+            tokens = max(1, chars // 4) if chars > 0 else 0
+            total_chars += chars
+            total_tokens += tokens
+            lines.append(f"{name:<30} | {chars:<12} | {tokens:<12}")
+
+        lines.append("-" * 60)
+        lines.append(f"{'GRAND TOTAL':<30} | {total_chars:<12} | {total_tokens:<12}")
+
+        buffer = self.summary_textview.get_buffer()
+        buffer.set_text("\n".join(lines))
+
+    def on_notebook_switch_page(self, notebook, page, page_num):
+        # If switching to the Summary tab (last tab index 4), auto-refresh stats
+        if page_num == 4:
+            self.refresh_summary_view()
 
     def get_text_from_textview(self, textview):
         buffer = textview.get_buffer()
@@ -219,7 +339,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         buffer.set_text(text if text else "")
 
     def populate_ui_from_card(self):
-        # Support either V2 structure directly or V3 data fallback
         data = self.card_data.get("data", self.card_data)
         
         self.entry_name.set_text(data.get("name", ""))
