@@ -26,6 +26,7 @@ class TavernCardValidator:
 
         spec = self.card.get('spec')
         
+        # If any spec identifier is present, validate strictly against that spec version
         if spec == 'chara_card_v3':
             if self.validate_v3():
                 return 3
@@ -34,8 +35,14 @@ class TavernCardValidator:
         if spec == 'chara_card_v2':
             if self.validate_v2():
                 return 2
+            # If it declared chara_card_v2 but failed validation, ensure error isn't overwritten by V1
             return False
 
+        if spec is not None:
+            self._last_validation_error = 'spec'
+            return False
+
+        # Otherwise, evaluate as V1 (cards without a spec field)
         if self.validate_v1():
             return 1
 
