@@ -11,7 +11,8 @@ from card_model import (
     write_card_to_json,
     read_card_from_png,
     write_card_to_png,
-    ensure_character_book
+    ensure_character_book,
+    process_avatar_image
 )
 
 class TestTavernCardModel(unittest.TestCase):
@@ -121,20 +122,16 @@ class TestTavernCardModel(unittest.TestCase):
             read_card_from_json(invalid_json)
 
     def test_png_metadata_roundtrip(self):
-        # Create a temporary base image and output file using tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             input_img_path = os.path.join(tmpdir, "base.png")
             output_img_path = os.path.join(tmpdir, "character.png")
 
-            # Create a small blank image with Pillow
             img = Image.new('RGB', (100, 100), color='white')
             img.save(input_img_path, 'PNG')
 
-            # Write card to PNG metadata
             write_card_to_png(input_img_path, output_img_path, self.valid_v2_card)
             self.assertTrue(os.path.exists(output_img_path))
 
-            # Read card back from PNG metadata
             read_card = read_card_from_png(output_img_path)
             self.assertEqual(read_card, self.valid_v2_card)
 
@@ -146,6 +143,32 @@ class TestTavernCardModel(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 read_card_from_png(blank_img_path)
+
+    def test_process_avatar_image_modes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_img_path = os.path.join(tmpdir, "source.jpg")
+            output_crop_path = os.path.join(tmpdir, "out_crop.png")
+            output_pad_path = os.path.join(tmpdir, "out_pad.png")
+            output_stretch_path = os.path.join(tmpdir, "out_stretch.png")
+
+            # Create a source test image (e.g. 300x200)
+            img = Image.new('RGB', (300, 200), color='blue')
+            img.save(input_img_path, 'JPEG')
+
+            # Test Crop mode
+            process_avatar_image(input_img_path, output_crop_path, target_size=(100, 100), resize_mode="crop")
+            with Image.open(output_crop_path) as out:
+                self.assertEqual(out.size, (100, 100))
+
+            # Test Pad mode
+            process_avatar_image(input_img_path, output_pad_path, target_size=(200, 200), resize_mode="pad")
+            with Image.open(output_pad_path) as out:
+                self.assertEqual(out.size, (200, 200))
+
+            # Test Stretch mode
+            process_avatar_image(input_img_path, output_stretch_path, target_size=(150, 250), resize_mode="stretch")
+            with Image.open(output_stretch_path) as out:
+                self.assertEqual(out.size, (150, 250))
 
 if __name__ == '__main__':
     unittest.main()
