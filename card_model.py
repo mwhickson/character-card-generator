@@ -275,3 +275,19 @@ def write_card_to_png(image_path: str, output_path: str, card_dict: Dict[str, An
 
         metadata.add_text('chara', base64_data)
         img.save(output_path, 'PNG', pnginfo=metadata)
+
+def ensure_character_book(card_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensures the V2/V3 card data structure has a valid character_book object."""
+    data = card_dict.setdefault("data", card_dict)
+    if "character_book" not in data or not isinstance(data["character_book"], dict):
+        data["character_book"] = {
+            "name": "",
+            "description": "",
+            "scan_depth": None,
+            "token_budget": None,
+            "recursive_scanning": False,
+            "extensions": {},
+            "entries": []
+        }
+    return data["character_book"]
+            

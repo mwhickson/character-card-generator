@@ -10,7 +10,8 @@ from card_model import (
     read_card_from_json,
     write_card_to_json,
     read_card_from_png,
-    write_card_to_png
+    write_card_to_png,
+    ensure_character_book
 )
 
 class TestTavernCardModel(unittest.TestCase):
@@ -43,6 +44,18 @@ class TestTavernCardModel(unittest.TestCase):
     def test_validator_v2_success(self):
         validator = TavernCardValidator(self.valid_v2_card)
         self.assertEqual(validator.validate(), 2)
+        self.assertIsNone(validator.last_validation_error)
+
+    def test_validator_v3_success(self):
+        v3_card = {
+            "spec": "chara_card_v3",
+            "spec_version": "3.0",
+            "data": {
+                "name": "V3 Character"
+            }
+        }
+        validator = TavernCardValidator(v3_card)
+        self.assertEqual(validator.validate(), 3)
         self.assertIsNone(validator.last_validation_error)
 
     def test_validator_v2_invalid_spec(self):
@@ -89,6 +102,13 @@ class TestTavernCardModel(unittest.TestCase):
         }
         validator = TavernCardValidator(card)
         self.assertEqual(validator.validate(), 2)
+
+    def test_ensure_character_book(self):
+        card = {"data": {}}
+        book = ensure_character_book(card)
+        self.assertIn("character_book", card["data"])
+        self.assertIn("entries", book)
+        self.assertEqual(book["entries"], [])
 
     def test_json_roundtrip(self):
         json_str = write_card_to_json(self.valid_v2_card)

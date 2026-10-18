@@ -12,13 +12,14 @@ from card_model import (
     write_card_to_json,
     read_card_from_png,
     write_card_to_png,
-    TavernCardValidator
+    TavernCardValidator,
+    ensure_character_book
 )
 
 class CharacterCardEditorWindow(Gtk.Window):
     def __init__(self):
         super().__init__(title="SillyTavern Character Card Creator (V2/V3)")
-        self.set_default_size(950, 750)
+        self.set_default_size(1050, 800)
         self.set_position(Gtk.WindowPosition.CENTER)
 
         self.current_file_path = None
@@ -42,6 +43,7 @@ class CharacterCardEditorWindow(Gtk.Window):
         self.notebook.append_page(self.create_core_tab(), Gtk.Label(label="Core Identity"))
         self.notebook.append_page(self.create_prompts_tab(), Gtk.Label(label="Prompts & Settings"))
         self.notebook.append_page(self.create_greetings_tab(), Gtk.Label(label="Alternate Greetings"))
+        self.notebook.append_page(self.create_book_tab(), Gtk.Label(label="Character Book"))
         self.notebook.append_page(self.create_metadata_tab(), Gtk.Label(label="Metadata & Tags"))
         self.notebook.append_page(self.create_summary_tab(), Gtk.Label(label="Summary & Tokens"))
 
@@ -215,6 +217,106 @@ class CharacterCardEditorWindow(Gtk.Window):
 
         return box
 
+    def create_book_tab(self):
+        # Master-detail layout for Character Book
+        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        paned.set_border_width(12)
+        paned.set_position(300)
+
+        # Left side: Entry List & Buttons
+        left_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        left_box.set_hexpand(False)
+
+        left_box.pack_start(Gtk.Label(label="<b>Book Entries</b>", use_markup=True, xalign=0), False, False, 0)
+
+        # List Store for Entries: (Index, Display Summary)
+        self.book_liststore = Gtk.ListStore(int, str)
+        self.book_treeview = Gtk.TreeView(model=self.book_liststore)
+        
+        renderer = Gtk.CellRendererText()
+        column = Gtk.TreeViewColumn("Key / Summary", renderer, text=1)
+        self.book_treeview.append_column(column)
+        
+        selection = self.book_treeview.get_selection()
+        selection.connect("changed", self.on_book_selection_changed)
+
+        scrolled_tree = Gtk.ScrolledWindow()
+        scrolled_tree.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled_tree.add(self.book_treeview)
+        scrolled_tree.set_vexpand(True)
+        left_box.pack_start(scrolled_tree, True, True, 0)
+
+        btn_box = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL)
+        btn_box.set_layout(Gtk.ButtonBoxStyle.SPREAD)
+        
+        btn_add = Gtk.Button(label="Add Entry")
+        btn_add.connect("clicked", self.on_add_book_entry)
+        btn_box.pack_start(btn_add, True, True, 0)
+
+        btn_del = Gtk.Button(label="Delete Entry")
+        btn_del.connect("clicked", self.on_delete_book_entry)
+        btn_box.pack_start(btn_del, True, True, 0)
+
+        left_box.pack_start(btn_box, False, False, 0)
+        paned.pack1(left_box, False, False)
+
+        # Right side: Entry Editor Grid
+        right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        right_box.set_border_width(6)
+        right_box.set_hexpand(True)
+
+        right_box.pack_start(Gtk.Label(label="<b>Entry Properties</b>", use_markup=True, xalign=0), False, False, 0)
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(10)
+        grid.set_row_spacing(8)
+
+        # Keys
+        grid.attach(Gtk.Label(label="Trigger Keys (Comma separated):", xalign=0), 0, 0, 1, 1)
+        self.entry_book_keys = Gtk.Entry()
+        self.entry_book_keys.set_hexpand(True)
+        self.entry_book_keys.connect("changed", self.on_book_field_changed)
+        grid.attach(self.entry_book_keys, 1, 0, 1, 1)
+
+        # Comment / Name
+        grid.attach(Gtk.Label(label="Comment / Name:", xalign=0), 0, 1, 1, 1)
+        self.entry_book_comment = Gtk.Entry()
+        self.entry_book_comment.set_hexpand(True)
+        self.entry_book_comment.connect("changed", self.on_book_field_changed)
+        grid.attach(self.entry_book_comment, 1, 1, 1, 1)
+
+        # Enabled Checkbox
+        self.chk_book_enabled = Gtk.CheckButton(label="Enabled")
+        self.chk_book_enabled.connect("toggled", self.on_book_field_changed)
+        grid.attach(self.chk_book_enabled, 1, 2, 1, 1)
+
+        # Constant Checkbox
+        self.chk_book_constant = Gtk.CheckButton(label="Constant (Always include)")
+        self.chk_book_constant.connect("toggled", self.on_book_field_changed)
+        grid.attach(self.chk_book_constant, 1, 3, 1, 1)
+
+        # Insertion Order
+        grid.attach(Gtk.Label(label="Insertion Order:", xalign=0), 0, 4, 1, 1)
+        self.spin_book_order = Gtk.SpinButton.new_with_range(0, 9999, 1)
+        self.spin_book_order.set_value(100)
+        self.spin_book_order.connect("value-changed", self.on_book_field_changed)
+        grid.attach(self.spin_book_order, 1, 4, 1, 1)
+
+        # Content Label
+        grid.attach(Gtk.Label(label="Content:", xalign=0), 0, 5, 1, 1)
+        
+        frame_content, self.textview_book_content = self.create_scrolled_text_view()
+        frame_content.set_hexpand(True)
+        frame_content.set_vexpand(True)
+        # Note: Textview changes tracked via buffer text change or save sync
+        grid.attach(frame_content, 1, 5, 1, 1)
+
+        right_box.pack_start(grid, True, True, 0)
+        paned.pack2(right_box, True, False)
+
+        self.current_selected_entry_idx = None
+        return paned
+
     def create_metadata_tab(self):
         grid = Gtk.Grid()
         grid.set_border_width(12)
@@ -304,31 +406,150 @@ class CharacterCardEditorWindow(Gtk.Window):
             ("Alternate Greetings", "\n".join(data.get("alternate_greetings", [])))
         ]
 
+        # Add character book entries to summary calculation
+        book = data.get("character_book")
+        if book and isinstance(book, dict):
+            entries = book.get("entries", [])
+            for idx, entry in enumerate(entries):
+                keys_str = ", ".join(entry.get("keys", []))
+                fields_to_check.append((f"Book Entry #{idx+1} [{keys_str}]", entry.get("content", "")))
+
         lines = []
-        lines.append(f"{'Field Name':<30} | {'Characters':<12} | {'Est. Tokens':<12}")
-        lines.append("-" * 60)
+        lines.append(f"{'Field Name':<35} | {'Characters':<10} | {'Est. Tokens':<10}")
+        lines.append("-" * 61)
 
         total_chars = 0
         total_tokens = 0
 
         for name, text in fields_to_check:
             chars = len(text)
-            # Standard heuristic: ~4 characters per token for English text
             tokens = max(1, chars // 4) if chars > 0 else 0
             total_chars += chars
             total_tokens += tokens
-            lines.append(f"{name:<30} | {chars:<12} | {tokens:<12}")
+            lines.append(f"{name:<35} | {chars:<10} | {tokens:<10}")
 
-        lines.append("-" * 60)
-        lines.append(f"{'GRAND TOTAL':<30} | {total_chars:<12} | {total_tokens:<12}")
+        lines.append("-" * 61)
+        lines.append(f"{'GRAND TOTAL':<35} | {total_chars:<10} | {total_tokens:<10}")
 
         buffer = self.summary_textview.get_buffer()
         buffer.set_text("\n".join(lines))
 
     def on_notebook_switch_page(self, notebook, page, page_num):
-        # If switching to the Summary tab (last tab index 4), auto-refresh stats
-        if page_num == 4:
+        # Index 5 is Summary tab
+        if page_num == 5:
             self.refresh_summary_view()
+
+    # --- Character Book Management Methods ---
+
+    def populate_book_list(self):
+        self.book_liststore.clear()
+        data = self.card_data.get("data", self.card_data)
+        book = data.get("character_book")
+        if not book or not isinstance(book, dict):
+            return
+        
+        entries = book.get("entries", [])
+        for idx, entry in enumerate(entries):
+            keys = ", ".join(entry.get("keys", []))
+            comment = entry.get("comment", "")
+            summary = f"[{keys}]" + (f" - {comment}" if comment else "")
+            self.book_liststore.append([idx, summary])
+
+    def on_book_selection_changed(self, selection):
+        model, treeiter = selection.get_selected()
+        if treeiter is not None:
+            idx = model[treeiter][0]
+            self.current_selected_entry_idx = idx
+            self.load_book_entry_into_ui(idx)
+        else:
+            self.current_selected_entry_idx = None
+            self.clear_book_entry_ui()
+
+    def load_book_entry_into_ui(self, idx):
+        data = self.card_data.get("data", self.card_data)
+        book = data.get("character_book")
+        if not book or idx >= len(book.get("entries", [])):
+            return
+        
+        entry = book["entries"][idx]
+        self.entry_book_keys.set_text(", ".join(entry.get("keys", [])))
+        self.entry_book_comment.set_text(entry.get("comment", ""))
+        self.chk_book_enabled.set_active(entry.get("enabled", True))
+        self.chk_book_constant.set_active(entry.get("constant", False))
+        self.spin_book_order.set_value(entry.get("insertion_order", 100))
+        self.set_text_to_textview(self.textview_book_content, entry.get("content", ""))
+
+    def clear_book_entry_ui(self):
+        self.entry_book_keys.set_text("")
+        self.entry_book_comment.set_text("")
+        self.chk_book_enabled.set_active(True)
+        self.chk_book_constant.set_active(False)
+        self.spin_book_order.set_value(100)
+        self.set_text_to_textview(self.textview_book_content, "")
+
+    def on_book_field_changed(self, widget):
+        if self.current_selected_entry_idx is None:
+            return
+        
+        data = self.card_data.get("data", self.card_data)
+        book = ensure_character_book(data)
+        entries = book.get("entries", [])
+        
+        if self.current_selected_entry_idx >= len(entries):
+            return
+
+        entry = entries[self.current_selected_entry_idx]
+        keys_text = self.entry_book_keys.get_text()
+        entry["keys"] = [k.strip() for k in keys_text.split(",") if k.strip()]
+        entry["comment"] = self.entry_book_comment.get_text()
+        entry["enabled"] = self.chk_book_enabled.get_active()
+        entry["constant"] = self.chk_book_constant.get_active()
+        entry["insertion_order"] = int(self.spin_book_order.get_value())
+        entry["content"] = self.get_text_from_textview(self.textview_book_content)
+
+        # Update list view summary text
+        selection = self.book_treeview.get_selection()
+        model, treeiter = selection.get_selected()
+        if treeiter is not None:
+            keys = ", ".join(entry.get("keys", []))
+            comment = entry.get("comment", "")
+            summary = f"[{keys}]" + (f" - {comment}" if comment else "")
+            model.set_value(treeiter, 1, summary)
+
+    def on_add_book_entry(self, widget):
+        data = self.card_data.get("data", self.card_data)
+        book = ensure_character_book(data)
+        
+        new_entry = {
+            "keys": ["keyword"],
+            "content": "Lore entry content here...",
+            "extensions": {},
+            "enabled": True,
+            "insertion_order": 100,
+            "constant": False,
+            "selective": False,
+            "secondary_keys": []
+        }
+        book["entries"].append(new_entry)
+        self.populate_book_list()
+        
+        # Select the newly added entry
+        path = Gtk.TreePath.new_from_indices([len(book["entries"]) - 1])
+        self.book_treeview.get_selection().select_path(path)
+
+    def on_delete_book_entry(self, widget):
+        if self.current_selected_entry_idx is None:
+            return
+        
+        data = self.card_data.get("data", self.card_data)
+        book = data.get("character_book")
+        if book and "entries" in book:
+            idx = self.current_selected_entry_idx
+            if 0 <= idx < len(book["entries"]):
+                book["entries"].pop(idx)
+                self.current_selected_entry_idx = None
+                self.populate_book_list()
+                self.clear_book_entry_ui()
 
     def get_text_from_textview(self, textview):
         buffer = textview.get_buffer()
@@ -361,6 +582,9 @@ class CharacterCardEditorWindow(Gtk.Window):
         tags = data.get("tags", [])
         self.entry_tags.set_text(", ".join(tags))
 
+        # Populate character book entries list
+        self.populate_book_list()
+
     def update_card_from_ui(self):
         data = self.card_data.setdefault("data", {})
 
@@ -390,6 +614,9 @@ class CharacterCardEditorWindow(Gtk.Window):
             data["tags"] = [t.strip() for t in tags_text.split(",") if t.strip()]
         else:
             data["tags"] = []
+
+        # Make sure current selected entry textview changes are saved
+        self.on_book_field_changed(None)
 
     def update_status(self, message):
         self.status_bar.push(0, message)
