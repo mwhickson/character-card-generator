@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=SillyTavern Card Creator
+Comment=Create and edit V2/V3 character cards
+Exec=python3 /usr/local/bin/character-card-generator/main.py
+Icon=applications-development
+Terminal=false
+Type=Application
+Categories=Utility;Development;
