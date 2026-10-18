@@ -25,7 +25,7 @@ class TavernCardValidator:
         self._last_validation_error = None
 
         spec = self.card.get('spec')
-        
+
         # If any spec identifier is present, validate strictly against that spec version
         if spec == 'chara_card_v3':
             if self.validate_v3():
@@ -207,12 +207,12 @@ def read_card_from_png(image_path: str) -> Dict[str, Any]:
     bypassing Pillow info dictionary filtering. Supports V3 taking precedence over V2.
     """
     text_chunks = {}
-    
+
     with open(image_path, 'rb') as f:
         signature = f.read(8)
         if signature != b'\x89PNG\r\n\x1a\n':
             raise ValueError("Not a valid PNG file.")
-        
+
         while True:
             length_bytes = f.read(4)
             if not length_bytes or len(length_bytes) < 4:
@@ -221,7 +221,7 @@ def read_card_from_png(image_path: str) -> Dict[str, Any]:
             chunk_type = f.read(4)
             chunk_data = f.read(length)
             crc = f.read(4)
-            
+
             if chunk_type == b'tEXt':
                 # tEXt format: keyword \0 text
                 parts = chunk_data.split(b'\x00', 1)
@@ -255,7 +255,7 @@ def read_card_from_png(image_path: str) -> Dict[str, Any]:
 
 def write_card_to_png(image_path: str, output_path: str, card_dict: Dict[str, Any]) -> None:
     """
-    Embeds the character card JSON dictionary as a base64-encoded 'chara' 
+    Embeds the character card JSON dictionary as a base64-encoded 'chara'
     tEXt chunk into a target PNG image (preserving V2 export standard).
     """
     validator = TavernCardValidator(card_dict)
@@ -267,7 +267,7 @@ def write_card_to_png(image_path: str, output_path: str, card_dict: Dict[str, An
 
     with Image.open(image_path) as img:
         metadata = PngInfo()
-        
+
         for key, value in img.info.items():
             if key.lower() not in ('chara', 'ccv3'):
                 if isinstance(value, str):
@@ -290,4 +290,50 @@ def ensure_character_book(card_dict: Dict[str, Any]) -> Dict[str, Any]:
             "entries": []
         }
     return data["character_book"]
-            
+
+def process_avatar_image(
+    input_path: str,
+    output_path: str,
+    crop_aspect: Optional[str] = None,  # "1:1" or "2:3"
+    target_size: Optional[tuple] = None, # (width, height)
+    max_dimension: Optional[int] = None
+) -> None:
+    """
+    Processes an avatar image (crop, resize) from any standard format (PNG, JPG, BMP)
+    and saves the output safely to a specified path.
+    """
+    with Image.open(input_path) as img:
+        img = img.convert("RGB")
+        w, h = img.size
+
+        # 1. Apply Aspect Ratio Crop
+        if crop_aspect == "1:1":
+            dim = min(w, h)
+            left = (w - dim) // 2
+            top = (h - dim) // 2
+            img = img.crop((left, top, left + dim, top + dim))
+        elif crop_aspect == "2:3":
+            target_h = int(w * 1.5)
+            if target_h <= h:
+                top = (h - target_h) // 2
+                img = img.crop((0, top, w, top + target_h))
+            else:
+                target_w = int(h / 1.5)
+                left = (w - target_w) // 2
+                img = img.crop((left, 0, left + target_w, h))
+
+        # 2. Resize to Exact Target Dimensions or Max Bound
+        if target_size:
+            img = img.resize(target_size, Image.Resampling.LANCZOS)
+        elif max_dimension:
+            curr_w, curr_h = img.size
+            if max(curr_w, curr_h) > max_dimension:
+                if curr_w > curr_h:
+                    new_w = max_dimension
+                    new_h = int(curr_h * (max_dimension / curr_w))
+                else:
+                    new_h = max_dimension
+                    new_w = int(curr_w * (max_dimension / curr_h))
+                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        img.save(output_path, "PNG")

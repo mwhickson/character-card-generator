@@ -1,10 +1,13 @@
 import sys
 import os
 import json
+import shutil
+import tempfile
 import gi
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
+gi.require_version('GdkPixbuf', '2.0')
+from gi.repository import Gtk, GdkPixbuf, GLib
 
 from card_model import (
     create_empty_v2_card,
@@ -13,17 +16,23 @@ from card_model import (
     read_card_from_png,
     write_card_to_png,
     TavernCardValidator,
-    ensure_character_book
+    ensure_character_book,
+    process_avatar_image
 )
 
 class CharacterCardEditorWindow(Gtk.Window):
     def __init__(self):
         super().__init__(title="SillyTavern Character Card Creator (V2/V3)")
-        self.set_default_size(1050, 800)
+        self.set_default_size(1100, 850)
         self.set_position(Gtk.WindowPosition.CENTER)
 
         self.current_file_path = None
+        self.original_avatar_path = None
         self.current_avatar_path = None
+        self.temp_avatar_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        self.temp_avatar_path = self.temp_avatar_file.name
+        self.temp_avatar_file.close()
+
         self.card_data = create_empty_v2_card()
 
         # Main Layout Box
@@ -44,16 +53,24 @@ class CharacterCardEditorWindow(Gtk.Window):
         self.notebook.append_page(self.create_prompts_tab(), Gtk.Label(label="Prompts & Settings"))
         self.notebook.append_page(self.create_greetings_tab(), Gtk.Label(label="Alternate Greetings"))
         self.notebook.append_page(self.create_book_tab(), Gtk.Label(label="Character Book"))
+        self.notebook.append_page(self.create_avatar_tab(), Gtk.Label(label="Avatar & Image"))
         self.notebook.append_page(self.create_metadata_tab(), Gtk.Label(label="Metadata & Tags"))
         self.notebook.append_page(self.create_summary_tab(), Gtk.Label(label="Summary & Tokens"))
 
-        # Status Bar / Token Info
+        # Status Bar
         self.status_bar = Gtk.Statusbar()
         main_box.pack_start(self.status_bar, False, False, 0)
         self.update_status("Ready. Create or load a character card.")
 
         # Load initial empty data into UI
         self.populate_ui_from_card()
+
+    def __del__(self):
+        if os.path.exists(self.temp_avatar_path):
+            try:
+                os.remove(self.temp_avatar_path)
+            except Exception:
+                pass
 
     def create_toolbar(self):
         toolbar = Gtk.Toolbar()
@@ -104,7 +121,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         grid.set_column_spacing(12)
         grid.set_row_spacing(10)
 
-        # Name
         lbl_name = Gtk.Label(label="Character Name:", xalign=0)
         lbl_name.set_valign(Gtk.Align.START)
         grid.attach(lbl_name, 0, 0, 1, 1)
@@ -114,7 +130,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         self.entry_name.set_valign(Gtk.Align.START)
         grid.attach(self.entry_name, 1, 0, 1, 1)
 
-        # Description
         lbl_desc = Gtk.Label(label="Description:", xalign=0)
         lbl_desc.set_valign(Gtk.Align.START)
         grid.attach(lbl_desc, 0, 1, 1, 1)
@@ -124,7 +139,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         frame_desc.set_vexpand(True)
         grid.attach(frame_desc, 1, 1, 1, 1)
 
-        # Personality
         lbl_pers = Gtk.Label(label="Personality Summary:", xalign=0)
         lbl_pers.set_valign(Gtk.Align.START)
         grid.attach(lbl_pers, 0, 2, 1, 1)
@@ -134,7 +148,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         frame_pers.set_vexpand(True)
         grid.attach(frame_pers, 1, 2, 1, 1)
 
-        # Scenario
         lbl_scen = Gtk.Label(label="Scenario:", xalign=0)
         lbl_scen.set_valign(Gtk.Align.START)
         grid.attach(lbl_scen, 0, 3, 1, 1)
@@ -144,7 +157,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         frame_scen.set_vexpand(True)
         grid.attach(frame_scen, 1, 3, 1, 1)
 
-        # First Message
         lbl_first = Gtk.Label(label="First Message:", xalign=0)
         lbl_first.set_valign(Gtk.Align.START)
         grid.attach(lbl_first, 0, 4, 1, 1)
@@ -154,7 +166,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         frame_first.set_vexpand(True)
         grid.attach(frame_first, 1, 4, 1, 1)
 
-        # Example Dialogue
         lbl_ex = Gtk.Label(label="Example Dialogue:", xalign=0)
         lbl_ex.set_valign(Gtk.Align.START)
         grid.attach(lbl_ex, 0, 5, 1, 1)
@@ -172,7 +183,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         grid.set_column_spacing(12)
         grid.set_row_spacing(10)
 
-        # System Prompt
         lbl_sys = Gtk.Label(label="System Prompt (Overrides Global):", xalign=0)
         lbl_sys.set_valign(Gtk.Align.START)
         grid.attach(lbl_sys, 0, 0, 1, 1)
@@ -182,7 +192,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         frame_sys.set_vexpand(True)
         grid.attach(frame_sys, 1, 0, 1, 1)
 
-        # Post History Instructions
         lbl_post = Gtk.Label(label="Post-History Instructions (Jailbreak):", xalign=0)
         lbl_post.set_valign(Gtk.Align.START)
         grid.attach(lbl_post, 0, 1, 1, 1)
@@ -192,7 +201,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         frame_post.set_vexpand(True)
         grid.attach(frame_post, 1, 1, 1, 1)
 
-        # Creator Notes
         lbl_notes = Gtk.Label(label="Creator Notes:", xalign=0)
         lbl_notes.set_valign(Gtk.Align.START)
         grid.attach(lbl_notes, 0, 2, 1, 1)
@@ -218,18 +226,14 @@ class CharacterCardEditorWindow(Gtk.Window):
         return box
 
     def create_book_tab(self):
-        # Master-detail layout for Character Book
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         paned.set_border_width(12)
         paned.set_position(300)
 
-        # Left side: Entry List & Buttons
         left_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         left_box.set_hexpand(False)
-
         left_box.pack_start(Gtk.Label(label="<b>Book Entries</b>", use_markup=True, xalign=0), False, False, 0)
 
-        # List Store for Entries: (Index, Display Summary)
         self.book_liststore = Gtk.ListStore(int, str)
         self.book_treeview = Gtk.TreeView(model=self.book_liststore)
         
@@ -260,7 +264,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         left_box.pack_start(btn_box, False, False, 0)
         paned.pack1(left_box, False, False)
 
-        # Right side: Entry Editor Grid
         right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         right_box.set_border_width(6)
         right_box.set_hexpand(True)
@@ -271,44 +274,37 @@ class CharacterCardEditorWindow(Gtk.Window):
         grid.set_column_spacing(10)
         grid.set_row_spacing(8)
 
-        # Keys
         grid.attach(Gtk.Label(label="Trigger Keys (Comma separated):", xalign=0), 0, 0, 1, 1)
         self.entry_book_keys = Gtk.Entry()
         self.entry_book_keys.set_hexpand(True)
         self.entry_book_keys.connect("changed", self.on_book_field_changed)
         grid.attach(self.entry_book_keys, 1, 0, 1, 1)
 
-        # Comment / Name
         grid.attach(Gtk.Label(label="Comment / Name:", xalign=0), 0, 1, 1, 1)
         self.entry_book_comment = Gtk.Entry()
         self.entry_book_comment.set_hexpand(True)
         self.entry_book_comment.connect("changed", self.on_book_field_changed)
         grid.attach(self.entry_book_comment, 1, 1, 1, 1)
 
-        # Enabled Checkbox
         self.chk_book_enabled = Gtk.CheckButton(label="Enabled")
         self.chk_book_enabled.connect("toggled", self.on_book_field_changed)
         grid.attach(self.chk_book_enabled, 1, 2, 1, 1)
 
-        # Constant Checkbox
         self.chk_book_constant = Gtk.CheckButton(label="Constant (Always include)")
         self.chk_book_constant.connect("toggled", self.on_book_field_changed)
         grid.attach(self.chk_book_constant, 1, 3, 1, 1)
 
-        # Insertion Order
         grid.attach(Gtk.Label(label="Insertion Order:", xalign=0), 0, 4, 1, 1)
         self.spin_book_order = Gtk.SpinButton.new_with_range(0, 9999, 1)
         self.spin_book_order.set_value(100)
         self.spin_book_order.connect("value-changed", self.on_book_field_changed)
         grid.attach(self.spin_book_order, 1, 4, 1, 1)
 
-        # Content Label
         grid.attach(Gtk.Label(label="Content:", xalign=0), 0, 5, 1, 1)
         
         frame_content, self.textview_book_content = self.create_scrolled_text_view()
         frame_content.set_hexpand(True)
         frame_content.set_vexpand(True)
-        # Note: Textview changes tracked via buffer text change or save sync
         grid.attach(frame_content, 1, 5, 1, 1)
 
         right_box.pack_start(grid, True, True, 0)
@@ -317,13 +313,199 @@ class CharacterCardEditorWindow(Gtk.Window):
         self.current_selected_entry_idx = None
         return paned
 
+    def create_avatar_tab(self):
+        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        paned.set_border_width(12)
+        paned.set_position(450)
+
+        # Left Side: Image Preview
+        preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        preview_box.pack_start(Gtk.Label(label="<b>Avatar Preview</b>", use_markup=True, xalign=0), False, False, 0)
+
+        self.avatar_image = Gtk.Image()
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.add(self.avatar_image)
+        preview_box.pack_start(scrolled, True, True, 0)
+
+        self.lbl_image_info = Gtk.Label(label="No image loaded", xalign=0)
+        preview_box.pack_start(self.lbl_image_info, False, False, 0)
+
+        paned.pack1(preview_box, True, False)
+
+        # Right Side: Image Manipulation Controls
+        ctrl_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        ctrl_box.set_border_width(8)
+
+        ctrl_box.pack_start(Gtk.Label(label="<b>Image Tools</b>", use_markup=True, xalign=0), False, False, 0)
+
+        btn_select_img = Gtk.Button(label="Select New Image...")
+        btn_select_img.connect("clicked", self.on_select_new_avatar)
+        ctrl_box.pack_start(btn_select_img, False, False, 0)
+
+        btn_revert = Gtk.Button(label="Revert to Original Image")
+        btn_revert.connect("clicked", self.on_revert_avatar)
+        ctrl_box.pack_start(btn_revert, False, False, 0)
+
+        btn_save_as = Gtk.Button(label="Save Processed Avatar As...")
+        btn_save_as.connect("clicked", self.on_save_avatar_as)
+        ctrl_box.pack_start(btn_save_as, False, False, 0)
+
+        # Quick Aspect Ratio Crop Options
+        crop_frame = Gtk.Frame(label=" Aspect Ratio Crop ")
+        crop_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        crop_box.set_border_width(8)
+
+        btn_crop_square = Gtk.Button(label="Center Crop to 1:1 Square")
+        btn_crop_square.connect("clicked", lambda w: self.apply_image_transform(crop_aspect="1:1"))
+        crop_box.pack_start(btn_crop_square, False, False, 0)
+
+        btn_crop_portrait = Gtk.Button(label="Center Crop to 2:3 Portrait")
+        btn_crop_portrait.connect("clicked", lambda w: self.apply_image_transform(crop_aspect="2:3"))
+        crop_box.pack_start(btn_crop_portrait, False, False, 0)
+
+        crop_frame.add(crop_box)
+        ctrl_box.pack_start(crop_frame, False, False, 0)
+
+        # Quick Preset Resizing Options
+        resize_frame = Gtk.Frame(label=" Preset Resizing ")
+        resize_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        resize_box.set_border_width(8)
+
+        btn_res_400 = Gtk.Button(label="Resize to 400x600 (Standard Portrait)")
+        btn_res_400.connect("clicked", lambda w: self.apply_image_transform(target_size=(400, 600)))
+        resize_box.pack_start(btn_res_400, False, False, 0)
+
+        btn_res_512 = Gtk.Button(label="Resize to 512x512 (Square)")
+        btn_res_512.connect("clicked", lambda w: self.apply_image_transform(target_size=(512, 512)))
+        resize_box.pack_start(btn_res_512, False, False, 0)
+
+        btn_res_max = Gtk.Button(label="Cap Max Dimension to 800px")
+        btn_res_max.connect("clicked", lambda w: self.apply_image_transform(max_dimension=800))
+        resize_box.pack_start(btn_res_max, False, False, 0)
+
+        resize_frame.add(resize_box)
+        ctrl_box.pack_start(resize_frame, False, False, 0)
+
+        paned.pack2(ctrl_box, False, False)
+        return paned
+
+    def update_avatar_preview(self):
+        if self.current_avatar_path and os.path.exists(self.current_avatar_path):
+            try:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file(self.current_avatar_path)
+                w = pixbuf.get_width()
+                h = pixbuf.get_height()
+                file_size_kb = os.path.getsize(self.current_avatar_path) / 1024.0
+                
+                max_preview_dim = 450
+                if w > max_preview_dim or h > max_preview_dim:
+                    if w > h:
+                        pw = max_preview_dim
+                        ph = int(h * (max_preview_dim / w))
+                    else:
+                        ph = max_preview_dim
+                        pw = int(w * (max_preview_dim / h))
+                    preview_pixbuf = pixbuf.scale_simple(pw, ph, GdkPixbuf.InterpType.BILINEAR)
+                else:
+                    preview_pixbuf = pixbuf
+
+                self.avatar_image.set_from_pixbuf(preview_pixbuf)
+                self.lbl_image_info.set_markup(
+                    f"<b>Dimensions:</b> {w}x{h} px  |  <b>File Size:</b> {file_size_kb:.1f} KB"
+                )
+            except Exception as e:
+                self.avatar_image.clear()
+                self.lbl_image_info.set_text(f"Error loading image preview: {str(e)}")
+        else:
+            self.avatar_image.clear()
+            self.lbl_image_info.set_text("No avatar image associated with current card.")
+
+    def on_select_new_avatar(self, widget):
+        dialog = Gtk.FileChooserDialog(
+            title="Select Avatar Image",
+            parent=self,
+            action=Gtk.FileChooserAction.OPEN
+        )
+        dialog.add_buttons("_Cancel", Gtk.ResponseType.CANCEL, "_Open", Gtk.ResponseType.ACCEPT)
+        
+        f_filter = Gtk.FileFilter()
+        f_filter.set_name("Standard Images (PNG, JPG, BMP)")
+        f_filter.add_pattern("*.png")
+        f_filter.add_pattern("*.jpg")
+        f_filter.add_pattern("*.jpeg")
+        f_filter.add_pattern("*.bmp")
+        dialog.add_filter(f_filter)
+
+        if dialog.run() == Gtk.ResponseType.ACCEPT:
+            filepath = dialog.get_filename()
+            self.original_avatar_path = filepath
+            # Copy to safe temp working file so we don't mutate original
+            shutil.copyfile(filepath, self.temp_avatar_path)
+            self.current_avatar_path = self.temp_avatar_path
+            self.update_avatar_preview()
+            self.update_status(f"Loaded avatar: {os.path.basename(filepath)}")
+        dialog.destroy()
+
+    def on_revert_avatar(self, widget):
+        if self.original_avatar_path and os.path.exists(self.original_avatar_path):
+            shutil.copyfile(self.original_avatar_path, self.temp_avatar_path)
+            self.current_avatar_path = self.temp_avatar_path
+            self.update_avatar_preview()
+            self.update_status("Reverted avatar edits to original source.")
+        else:
+            self.show_error_dialog("No original source image to revert to.")
+
+    def on_save_avatar_as(self, widget):
+        if not self.current_avatar_path or not os.path.exists(self.current_avatar_path):
+            self.show_error_dialog("No processed avatar image to save.")
+            return
+
+        dialog = Gtk.FileChooserDialog(
+            title="Save Processed Avatar Image",
+            parent=self,
+            action=Gtk.FileChooserAction.SAVE
+        )
+        dialog.add_buttons("_Cancel", Gtk.ResponseType.CANCEL, "_Save", Gtk.ResponseType.ACCEPT)
+        
+        default_name = self.card_data.get("data", self.card_data).get("name", "avatar")
+        dialog.set_current_name(f"{default_name}_edited.png")
+
+        if dialog.run() == Gtk.ResponseType.ACCEPT:
+            output_path = dialog.get_filename()
+            dialog.destroy()
+            try:
+                shutil.copyfile(self.current_avatar_path, output_path)
+                self.update_status(f"Saved processed avatar to {os.path.basename(output_path)}")
+            except Exception as e:
+                self.show_error_dialog(f"Failed to save avatar image:\n{str(e)}")
+        else:
+            dialog.destroy()
+
+    def apply_image_transform(self, crop_aspect=None, target_size=None, max_dimension=None):
+        if not self.current_avatar_path or not os.path.exists(self.current_avatar_path):
+            self.show_error_dialog("Please select or load an image first.")
+            return
+
+        try:
+            process_avatar_image(
+                input_path=self.current_avatar_path,
+                output_path=self.current_avatar_path,
+                crop_aspect=crop_aspect,
+                target_size=target_size,
+                max_dimension=max_dimension
+            )
+            self.update_avatar_preview()
+            self.update_status("Image transformed successfully!")
+        except Exception as e:
+            self.show_error_dialog(f"Failed to transform image:\n{str(e)}")
+
     def create_metadata_tab(self):
         grid = Gtk.Grid()
         grid.set_border_width(12)
         grid.set_column_spacing(12)
         grid.set_row_spacing(10)
 
-        # Creator
         lbl_creator = Gtk.Label(label="Creator:", xalign=0)
         lbl_creator.set_valign(Gtk.Align.START)
         grid.attach(lbl_creator, 0, 0, 1, 1)
@@ -333,7 +515,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         self.entry_creator.set_valign(Gtk.Align.START)
         grid.attach(self.entry_creator, 1, 0, 1, 1)
 
-        # Character Version
         lbl_version = Gtk.Label(label="Character Version:", xalign=0)
         lbl_version.set_valign(Gtk.Align.START)
         grid.attach(lbl_version, 0, 1, 1, 1)
@@ -343,7 +524,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         self.entry_version.set_valign(Gtk.Align.START)
         grid.attach(self.entry_version, 1, 1, 1, 1)
 
-        # Tags
         lbl_tags = Gtk.Label(label="Tags (Comma separated):", xalign=0)
         lbl_tags.set_valign(Gtk.Align.START)
         grid.attach(lbl_tags, 0, 2, 1, 1)
@@ -406,7 +586,6 @@ class CharacterCardEditorWindow(Gtk.Window):
             ("Alternate Greetings", "\n".join(data.get("alternate_greetings", [])))
         ]
 
-        # Add character book entries to summary calculation
         book = data.get("character_book")
         if book and isinstance(book, dict):
             entries = book.get("entries", [])
@@ -435,11 +614,10 @@ class CharacterCardEditorWindow(Gtk.Window):
         buffer.set_text("\n".join(lines))
 
     def on_notebook_switch_page(self, notebook, page, page_num):
-        # Index 5 is Summary tab
-        if page_num == 5:
+        if page_num == 4:
+            self.update_avatar_preview()
+        elif page_num == 6:
             self.refresh_summary_view()
-
-    # --- Character Book Management Methods ---
 
     def populate_book_list(self):
         self.book_liststore.clear()
@@ -507,7 +685,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         entry["insertion_order"] = int(self.spin_book_order.get_value())
         entry["content"] = self.get_text_from_textview(self.textview_book_content)
 
-        # Update list view summary text
         selection = self.book_treeview.get_selection()
         model, treeiter = selection.get_selected()
         if treeiter is not None:
@@ -533,7 +710,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         book["entries"].append(new_entry)
         self.populate_book_list()
         
-        # Select the newly added entry
         path = Gtk.TreePath.new_from_indices([len(book["entries"]) - 1])
         self.book_treeview.get_selection().select_path(path)
 
@@ -582,8 +758,8 @@ class CharacterCardEditorWindow(Gtk.Window):
         tags = data.get("tags", [])
         self.entry_tags.set_text(", ".join(tags))
 
-        # Populate character book entries list
         self.populate_book_list()
+        self.update_avatar_preview()
 
     def update_card_from_ui(self):
         data = self.card_data.setdefault("data", {})
@@ -615,7 +791,6 @@ class CharacterCardEditorWindow(Gtk.Window):
         else:
             data["tags"] = []
 
-        # Make sure current selected entry textview changes are saved
         self.on_book_field_changed(None)
 
     def update_status(self, message):
@@ -624,8 +799,11 @@ class CharacterCardEditorWindow(Gtk.Window):
     def on_new_clicked(self, widget):
         self.card_data = create_empty_v2_card()
         self.current_file_path = None
+        self.original_avatar_path = None
         self.current_avatar_path = None
         self.populate_ui_from_card()
+        # Reset notebook view back to the first tab (Core Identity)
+        self.notebook.set_current_page(0)
         self.update_status("Created new character card.")
 
     def on_open_clicked(self, widget):
@@ -652,9 +830,13 @@ class CharacterCardEditorWindow(Gtk.Window):
                 if filepath.endswith(".json"):
                     with open(filepath, "r", encoding="utf-8") as f:
                         self.card_data = read_card_from_json(f.read())
+                    self.original_avatar_path = None
+                    self.current_avatar_path = None
                 elif filepath.endswith(".png"):
                     self.card_data = read_card_from_png(filepath)
-                    self.current_avatar_path = filepath
+                    self.original_avatar_path = filepath
+                    shutil.copyfile(filepath, self.temp_avatar_path)
+                    self.current_avatar_path = self.temp_avatar_path
                 
                 self.current_file_path = filepath
                 self.populate_ui_from_card()
@@ -704,8 +886,11 @@ class CharacterCardEditorWindow(Gtk.Window):
             )
             dialog.add_buttons("_Cancel", Gtk.ResponseType.CANCEL, "_Open", Gtk.ResponseType.ACCEPT)
             f_filter = Gtk.FileFilter()
-            f_filter.set_name("PNG Images")
+            f_filter.set_name("Standard Images")
             f_filter.add_pattern("*.png")
+            f_filter.add_pattern("*.jpg")
+            f_filter.add_pattern("*.jpeg")
+            f_filter.add_pattern("*.bmp")
             dialog.add_filter(f_filter)
             
             if dialog.run() == Gtk.ResponseType.ACCEPT:
