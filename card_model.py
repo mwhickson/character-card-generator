@@ -294,24 +294,26 @@ def ensure_character_book(card_dict: Dict[str, Any]) -> Dict[str, Any]:
 def process_avatar_image(
     input_path: str,
     output_path: str,
-    crop_aspect: Optional[str] = None,  # "1:1" or "2:3"
+    crop_aspect: Optional[str] = None,
     target_size: Optional[tuple] = None, # (width, height)
-    max_dimension: Optional[int] = None
+    max_dimension: Optional[int] = None,
+    resize_mode: str = "crop", # "crop" (cover/center crop), "pad" (letterbox), or "stretch"
+    pad_color: tuple = (0, 0, 0)
 ) -> None:
     """
-    Processes an avatar image (crop, resize) from any standard format (PNG, JPG, BMP)
-    and saves the output safely to a specified path.
+    Processes an avatar image with advanced scaling modes (cover crop, padding, or stretch)
+    to prevent image distortion.
     """
     with Image.open(input_path) as img:
         img = img.convert("RGB")
         w, h = img.size
 
-        # 1. Apply Aspect Ratio Crop
         if crop_aspect == "1:1":
             dim = min(w, h)
             left = (w - dim) // 2
             top = (h - dim) // 2
             img = img.crop((left, top, left + dim, top + dim))
+            w, h = img.size
         elif crop_aspect == "2:3":
             target_h = int(w * 1.5)
             if target_h <= h:
@@ -321,10 +323,40 @@ def process_avatar_image(
                 target_w = int(h / 1.5)
                 left = (w - target_w) // 2
                 img = img.crop((left, 0, left + target_w, h))
+            w, h = img.size
 
-        # 2. Resize to Exact Target Dimensions or Max Bound
         if target_size:
-            img = img.resize(target_size, Image.Resampling.LANCZOS)
+            tw, th = target_size
+            if resize_mode == "stretch":
+                img = img.resize((tw, th), Image.Resampling.LANCZOS)
+            elif resize_mode == "pad":
+                # Scale to fit inside tw x th while maintaining aspect ratio, then pad
+                img.thumbnail((tw, th), Image.Resampling.LANCZOS)
+                new_img = Image.new("RGB", (tw, th), pad_color)
+                iw, ih = img.size
+                paste_left = (tw - iw) // 2
+                paste_top = (th - ih) // 2
+                new_img.paste(img, (paste_left, paste_top))
+                img = new_img
+            else:
+                # Default "crop": Cover target dimensions, center crop overflow
+                src_ratio = w / h
+                target_ratio = tw / th
+                if src_ratio > target_ratio:
+                    new_h = th
+                    new_y = int(th * (w / h)) # placeholder calc
+                    # Correct scaling based on ratio
+                    scale = th / h
+                    new_w = int(w * scale)
+                    img = img.resize((new_w, th), Image.Resampling.LANCZOS)
+                    left = (new_w - tw) // 2
+                    img = img.crop((left, 0, left + tw, th))
+                else:
+                    scale = tw / w
+                    new_h = int(h * scale)
+                    img = img.resize((tw, new_h), Image.Resampling.LANCZOS)
+                    top = (new_h - th) // 2
+                    img = img.crop((0, top, tw, top + th))
         elif max_dimension:
             curr_w, curr_h = img.size
             if max(curr_w, curr_h) > max_dimension:
