@@ -6,7 +6,7 @@ from PIL.PngImagePlugin import PngInfo
 
 class TavernCardValidator:
     """
-    Validates character card data structures against V1 and V2 specifications,
+    Validates character card data structures against V1, V2, and V3 specifications,
     matching the reference implementation from SillyTavern.
     """
     def __init__(self, card: Dict[str, Any]):
@@ -19,18 +19,23 @@ class TavernCardValidator:
 
     def validate(self) -> Union[int, bool]:
         """
-        Validate against V1 or V2 spec.
-        Returns: 1 for V1, 2 for V2, or False if validation fails.
+        Validate against V1, V2, or V3 spec.
+        Returns: 1 for V1, 2 for V2, 3 for V3, or False if validation fails.
         """
         self._last_validation_error = None
 
-        # If 'spec' is present, evaluate strictly as V2
-        if 'spec' in self.card:
+        spec = self.card.get('spec')
+        
+        if spec == 'chara_card_v3':
+            if self.validate_v3():
+                return 3
+            return False
+
+        if spec == 'chara_card_v2':
             if self.validate_v2():
                 return 2
             return False
 
-        # Otherwise, evaluate as V1
         if self.validate_v1():
             return 1
 
@@ -50,6 +55,13 @@ class TavernCardValidator:
             and self._validate_spec_version_v2()
             and self._validate_data_v2()
             and self._validate_character_book_v2()
+        )
+
+    def validate_v3(self) -> bool:
+        return (
+            self._validate_spec_v3()
+            and self._validate_spec_version_v3()
+            and self._validate_data_v3()
         )
 
     def _validate_spec_v2(self) -> bool:
@@ -120,6 +132,29 @@ class TavernCardValidator:
 
         return True
 
+    def _validate_spec_v3(self) -> bool:
+        if self.card.get('spec') != 'chara_card_v3':
+            self._last_validation_error = 'spec'
+            return False
+        return True
+
+    def _validate_spec_version_v3(self) -> bool:
+        try:
+            version = float(self.card.get('spec_version', 0))
+            if 3.0 <= version < 4.0:
+                return True
+        except (ValueError, TypeError):
+            pass
+        self._last_validation_error = 'spec_version'
+        return False
+
+    def _validate_data_v3(self) -> bool:
+        data = self.card.get('data')
+        if not isinstance(data, dict):
+            self._last_validation_error = 'No tavern card data found'
+            return False
+        return True
+
 
 def create_empty_v2_card() -> Dict[str, Any]:
     """Returns a fully structured, empty V2 character card dictionary."""
@@ -148,12 +183,9 @@ def create_empty_v2_card() -> Dict[str, Any]:
 def read_card_from_json(json_str: str) -> Dict[str, Any]:
     """Parses and validates a character card from a JSON string."""
     raw_data = json.loads(json_str)
-    
-    # If it's a V1 card, wrap it into V2 structure or keep as is depending on workflow
     validator = TavernCardValidator(raw_data)
     if not validator.validate():
         raise ValueError(f"Invalid character card format: {validator.last_validation_error}")
-    
     return raw_data
 
 
@@ -164,33 +196,60 @@ def write_card_to_json(card_dict: Dict[str, Any]) -> str:
 
 def read_card_from_png(image_path: str) -> Dict[str, Any]:
     """
-    Extracts the base64-encoded 'chara' chunk from a PNG file, 
-    decodes it from UTF-8, and parses the JSON character card data.
+    Directly parses PNG binary chunks to extract 'ccv3' or 'chara' text data,
+    bypassing Pillow info dictionary filtering. Supports V3 taking precedence over V2.
     """
-    with Image.open(image_path) as img:
-        # Check standard info dictionary or raw metadata chunks
-        chara_data = img.info.get('chara')
+    text_chunks = {}
+    
+    with open(image_path, 'rb') as f:
+        signature = f.read(8)
+        if signature != b'\x89PNG\r\n\x1a\n':
+            raise ValueError("Not a valid PNG file.")
         
-        if not chara_data:
-            # Fallback check case-insensitively across info keys
-            for key, value in img.info.items():
-                if key.lower() == 'chara':
-                    chara_data = value
-                    break
+        while True:
+            length_bytes = f.read(4)
+            if not length_bytes or len(length_bytes) < 4:
+                break
+            length = int.from_bytes(length_bytes, byteorder='big')
+            chunk_type = f.read(4)
+            chunk_data = f.read(length)
+            crc = f.read(4)
+            
+            if chunk_type == b'tEXt':
+                # tEXt format: keyword \0 text
+                parts = chunk_data.split(b'\x00', 1)
+                if len(parts) == 2:
+                    keyword = parts[0].decode('latin-1', errors='ignore').strip().lower()
+                    text = parts[1].decode('utf-8', errors='ignore')
+                    text_chunks[keyword] = text
+            elif chunk_type == b'iTXt':
+                # iTXt format: keyword \0 compression_flag compression_method language_tag \0 translated_keyword \0 text
+                parts = chunk_data.split(b'\x00', 3)
+                if len(parts) >= 4:
+                    keyword = parts[0].decode('latin-1', errors='ignore').strip().lower()
+                    text = parts[3].decode('utf-8', errors='ignore')
+                    text_chunks[keyword] = text
+            elif chunk_type == b'IEND':
+                break
 
-        if not chara_data:
-            raise ValueError("No character metadata ('chara' chunk) found in PNG image.")
+    raw_data = None
+    # V3 ('ccv3') takes precedence over V2 ('chara') per SillyTavern spec
+    if 'ccv3' in text_chunks:
+        raw_data = text_chunks['ccv3']
+    elif 'chara' in text_chunks:
+        raw_data = text_chunks['chara']
 
-        # Decode base64 to string, then parse JSON
-        decoded_bytes = base64.b64decode(chara_data)
-        json_str = decoded_bytes.decode('utf-8')
-        return read_card_from_json(json_str)
+    if not raw_data:
+        raise ValueError("No character metadata ('ccv3' or 'chara') found in PNG image.")
 
+    decoded_bytes = base64.b64decode(raw_data)
+    json_str = decoded_bytes.decode('utf-8')
+    return read_card_from_json(json_str)
 
 def write_card_to_png(image_path: str, output_path: str, card_dict: Dict[str, Any]) -> None:
     """
     Embeds the character card JSON dictionary as a base64-encoded 'chara' 
-    tEXt chunk into a target PNG image.
+    tEXt chunk into a target PNG image (preserving V2 export standard).
     """
     validator = TavernCardValidator(card_dict)
     if not validator.validate():
@@ -202,14 +261,10 @@ def write_card_to_png(image_path: str, output_path: str, card_dict: Dict[str, An
     with Image.open(image_path) as img:
         metadata = PngInfo()
         
-        # Copy existing PNG metadata chunks except 'chara'
         for key, value in img.info.items():
-            if key.lower() != 'chara':
+            if key.lower() not in ('chara', 'ccv3'):
                 if isinstance(value, str):
                     metadata.add_text(key, value)
 
-        # Add the character card chunk
         metadata.add_text('chara', base64_data)
-        
-        # Save output image preserving format
         img.save(output_path, 'PNG', pnginfo=metadata)
