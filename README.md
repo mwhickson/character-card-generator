@@ -4,6 +4,8 @@ This is a desktop application facilitating the creation and ongoing editing of S
 
 The application targets version 2 of the Character Card format as detailed at https://github.com/malfoyslastname/character-card-spec-v2 and via the SillyTavern source.
 
+NOTE: You can chat with your characters using [Strawberry Social](https://github.com/mwhickson/strawberry-social), a light-weight SillyTavern alternative. You will need a llama.cpp compatible LLM server.
+
 ## Features
 
 - loads JSON/PNG Character Cards in version 1, 2 or 3 format
